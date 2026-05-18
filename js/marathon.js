@@ -1,6 +1,5 @@
 /**
- * Ghostline Rush — Marathon web demo (top-down, matches core loop).
- * Constant movement · 4-way steer · screen wrap · ghost echo every 8s · 2 pillars · max 12 echoes.
+ * Ghostline Rush — Marathon web demo
  */
 (function () {
   const canvas = document.getElementById("marathon-canvas");
@@ -15,14 +14,9 @@
   const overlayMsg = document.getElementById("overlay-msg");
   const btnRestart = document.getElementById("btn-restart");
   const btnPlayAgain = document.getElementById("btn-play-again");
-
-  const W = 360;
-  const H = 360;
-  const DPR = Math.min(window.devicePixelRatio || 1, 2);
-  canvas.width = W * DPR;
-  canvas.height = H * DPR;
-  canvas.style.aspectRatio = "1 / 1";
-  ctx.scale(DPR, DPR);
+  const btnClose = document.getElementById("btn-close-overlay");
+  const btnCloseBottom = document.getElementById("btn-close-bottom");
+  const touchPad = document.getElementById("touch-pad");
 
   const SEGMENT_SEC = 8;
   const MAX_GHOSTS = 12;
@@ -31,13 +25,13 @@
   const GHOST_R = 11;
   const ORB_R = 9;
 
-  const PILLARS = [
-    { x: W * 0.32, y: H * 0.48, r: 22 },
-    { x: W * 0.68, y: H * 0.52, r: 22 },
-  ];
+  let W = 360;
+  let H = 360;
+  let dpr = 1;
 
+  let pillars = [];
   let state = "ready";
-  let ship = { x: W / 2, y: H / 2 };
+  let ship = { x: 180, y: 180 };
   let dir = { x: 0, y: -1 };
   let orbs = 0;
   let time = 0;
@@ -46,9 +40,40 @@
   let ghosts = [];
   let orbList = [];
   let stars = [];
-  let keys = {};
+  const keys = {};
   let touchDir = null;
   let ghostWarn = false;
+
+  const BLOCK_KEYS = new Set([
+    "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
+    "w", "a", "s", "d", "W", "A", "S", "D", " ",
+  ]);
+
+  function layoutPillars() {
+    pillars = [
+      { x: W * 0.32, y: H * 0.48, r: W * 0.06 },
+      { x: W * 0.68, y: H * 0.52, r: W * 0.06 },
+    ];
+  }
+
+  function resize() {
+    const panel = canvas.parentElement;
+    const max = Math.min(panel ? panel.clientWidth - 8 : 360, 420, window.innerWidth - 24);
+    const size = Math.max(280, Math.floor(max));
+    W = size;
+    H = size;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+    canvas.width = W * dpr;
+    canvas.height = H * dpr;
+    canvas.style.width = W + "px";
+    canvas.style.height = H + "px";
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    layoutPillars();
+    if (state === "playing") {
+      ship.x = Math.min(ship.x, W - 20);
+      ship.y = Math.min(ship.y, H - 20);
+    }
+  }
 
   function wrap(v, max) {
     if (v < 0) return v + max;
@@ -69,7 +94,21 @@
     return a + Math.random() * (b - a);
   }
 
+  function closeOverlay() {
+    hideOverlay();
+    state = "ready";
+    draw();
+  }
+
+  function hideOverlay() {
+    if (overlay) {
+      overlay.hidden = true;
+      overlay.classList.remove("visible");
+    }
+  }
+
   function reset() {
+    hideOverlay();
     state = "playing";
     ship = { x: W / 2, y: H / 2 };
     dir = { x: 0, y: -1 };
@@ -80,16 +119,13 @@
     ghosts = [];
     orbList = [];
     ghostWarn = false;
-    if (overlay) {
-      overlay.classList.remove("visible");
-      overlay.hidden = true;
-    }
     fillOrbs();
     updateHud();
+    canvas.focus({ preventScroll: true });
   }
 
   function pillarHit(p) {
-    for (const col of PILLARS) {
+    for (const col of pillars) {
       if (dist(p, col) < col.r + SHIP_R) return true;
     }
     return false;
@@ -97,17 +133,17 @@
 
   function spawnOrb() {
     for (let i = 0; i < 40; i++) {
-      const p = { x: rand(ORB_R, W - ORB_R), y: rand(ORB_R, H - ORB_R) };
-      if (pillarHit(p) || dist(p, ship) < 40) continue;
+      const p = { x: rand(ORB_R + 8, W - ORB_R - 8), y: rand(ORB_R + 8, H - ORB_R - 8) };
+      if (pillarHit(p) || dist(p, ship) < 36) continue;
       let ok = true;
       for (const o of orbList) {
-        if (dist(p, o) < 28) {
+        if (dist(p, o) < 24) {
           ok = false;
           break;
         }
       }
       if (ok) {
-        orbList.push({ ...p, pulse: Math.random() * 6.28 });
+        orbList.push({ x: p.x, y: p.y, pulse: Math.random() * 6.28 });
         return;
       }
     }
@@ -131,16 +167,15 @@
     }
     if (overlayTitle) overlayTitle.textContent = "RUN ENDED";
     if (overlayMsg) {
-      overlayMsg.textContent = `${reason} You collected ${orbs} orbs in ${time.toFixed(1)}s. Bank orbs in the app (2× on Sunday).`;
+      overlayMsg.textContent = `${reason} You collected ${orbs} orbs in ${time.toFixed(1)}s.`;
     }
     window.GhostlineAds?.showGameOverAd?.();
   }
 
   function finalizeSegment() {
-    if (record.length < 4) return;
-    const path = record.map((p) => ({ x: p.x, y: p.y }));
+    if (record.length < 8) return;
     ghosts.push({
-      path,
+      path: record.map((p) => ({ x: p.x, y: p.y })),
       t: 0,
       duration: SEGMENT_SEC,
     });
@@ -150,24 +185,27 @@
     ghostWarn = false;
   }
 
-  function ghostShipPos(g) {
+  function ghostState(g) {
     const n = g.path.length;
-    if (n < 2) return g.path[0] || { x: 0, y: 0 };
+    if (n < 2) return { x: g.path[0]?.x ?? 0, y: g.path[0]?.y ?? 0, angle: 0 };
     const u = (g.t % g.duration) / g.duration;
     const idx = u * (n - 1);
-    const i = Math.floor(idx);
+    const i = Math.min(Math.floor(idx), n - 2);
     const f = idx - i;
     const a = g.path[i];
-    const b = g.path[Math.min(i + 1, n - 1)];
-    return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+    const b = g.path[i + 1];
+    const x = a.x + (b.x - a.x) * f;
+    const y = a.y + (b.y - a.y) * f;
+    const angle = Math.atan2(b.y - a.y, b.x - a.x) + Math.PI / 2;
+    return { x, y, angle };
   }
 
   function applyInput() {
     let nd = null;
-    if (keys.ArrowRight || keys.d) nd = { x: 1, y: 0 };
-    else if (keys.ArrowLeft || keys.a) nd = { x: -1, y: 0 };
-    else if (keys.ArrowDown || keys.s) nd = { x: 0, y: 1 };
-    else if (keys.ArrowUp || keys.w) nd = { x: 0, y: -1 };
+    if (keys.ArrowRight || keys.d || keys.D) nd = { x: 1, y: 0 };
+    else if (keys.ArrowLeft || keys.a || keys.A) nd = { x: -1, y: 0 };
+    else if (keys.ArrowDown || keys.s || keys.S) nd = { x: 0, y: 1 };
+    else if (keys.ArrowUp || keys.w || keys.W) nd = { x: 0, y: -1 };
     else if (touchDir) nd = touchDir;
     if (nd) dir = nd;
   }
@@ -184,18 +222,19 @@
     wrapPos(ship);
 
     record.push({ x: ship.x, y: ship.y });
-    if (record.length > 500) record.shift();
+    if (record.length > 600) record.shift();
 
     if (!ghostWarn && segmentT >= SEGMENT_SEC - 2) ghostWarn = true;
     if (segmentT >= SEGMENT_SEC) finalizeSegment();
 
     for (const g of ghosts) g.t += dt;
 
-    for (const o of orbList) {
+    for (let i = orbList.length - 1; i >= 0; i--) {
+      const o = orbList[i];
       o.pulse += dt * 4;
       if (dist(ship, o) < ORB_R + SHIP_R) {
         orbs++;
-        orbList = orbList.filter((x) => x !== o);
+        orbList.splice(i, 1);
         spawnOrb();
       }
     }
@@ -206,7 +245,8 @@
       return;
     }
     for (const g of ghosts) {
-      if (dist(ship, ghostShipPos(g)) < SHIP_R + GHOST_R) {
+      const gs = ghostState(g);
+      if (dist(ship, gs) < SHIP_R + GHOST_R) {
         gameOver("You were caught by your own echo.");
         return;
       }
@@ -215,76 +255,66 @@
     updateHud();
   }
 
+  function drawShip(x, y, angle, alpha, isPlayer) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(x, y);
+    ctx.rotate(angle);
+    if (isPlayer) {
+      ctx.shadowColor = "#06b6d4";
+      ctx.shadowBlur = 12;
+      ctx.fillStyle = "#67e8f9";
+    } else {
+      ctx.shadowColor = "rgba(100, 150, 255, 0.6)";
+      ctx.shadowBlur = 8;
+      ctx.fillStyle = "rgba(100, 150, 255, 0.55)";
+      ctx.strokeStyle = "rgba(150, 200, 255, 0.7)";
+      ctx.lineWidth = 1.5;
+    }
+    ctx.beginPath();
+    ctx.moveTo(0, -13);
+    ctx.lineTo(9, 9);
+    ctx.lineTo(0, 4);
+    ctx.lineTo(-9, 9);
+    ctx.closePath();
+    ctx.fill();
+    if (!isPlayer) ctx.stroke();
+    ctx.restore();
+  }
+
   function drawPillar(c) {
     const g = ctx.createRadialGradient(c.x, c.y, 2, c.x, c.y, c.r);
     g.addColorStop(0, "#9333ea");
     g.addColorStop(0.6, "#6b21a8");
-    g.addColorStop(1, "rgba(6, 182, 212, 0.2)");
+    g.addColorStop(1, "rgba(6, 182, 212, 0.15)");
     ctx.fillStyle = g;
     ctx.beginPath();
     ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = "rgba(103, 232, 249, 0.45)";
+    ctx.strokeStyle = "rgba(103, 232, 249, 0.4)";
     ctx.lineWidth = 2;
     ctx.stroke();
-  }
-
-  function drawShip(p, angle, alpha, glow) {
-    ctx.save();
-    ctx.globalAlpha = alpha;
-    ctx.translate(p.x, p.y);
-    ctx.rotate(angle);
-    ctx.fillStyle = glow ? "#67e8f9" : "rgba(100, 150, 255, 0.85)";
-    ctx.shadowColor = glow ? "#06b6d4" : "transparent";
-    ctx.shadowBlur = glow ? 14 : 0;
-    ctx.beginPath();
-    ctx.moveTo(0, -14);
-    ctx.lineTo(10, 10);
-    ctx.lineTo(0, 5);
-    ctx.lineTo(-10, 10);
-    ctx.closePath();
-    ctx.fill();
-    ctx.restore();
-  }
-
-  function drawGhostTrail(g) {
-    if (g.path.length < 2) return;
-    ctx.strokeStyle = "rgba(100, 150, 255, 0.25)";
-    ctx.lineWidth = 3;
-    ctx.lineCap = "round";
-    ctx.beginPath();
-    ctx.moveTo(g.path[0].x, g.path[0].y);
-    for (let i = 1; i < g.path.length; i++) ctx.lineTo(g.path[i].x, g.path[i].y);
-    ctx.stroke();
-    const gp = ghostShipPos(g);
-    const angle = Math.atan2(
-      g.path[Math.min(1, g.path.length - 1)].y - g.path[0].y,
-      g.path[Math.min(1, g.path.length - 1)].x - g.path[0].x
-    );
-    drawShip(gp, angle - Math.PI / 2, 0.7, false);
   }
 
   function draw() {
     ctx.fillStyle = "#0f0f1a";
     ctx.fillRect(0, 0, W, H);
 
-    if (stars.length < 60) {
-      for (let i = 0; i < 60; i++) {
+    if (stars.length < 50) {
+      stars.length = 0;
+      for (let i = 0; i < 50; i++) {
         stars.push({ x: Math.random() * W, y: Math.random() * H, s: Math.random() * 1.5 });
       }
     }
     for (const s of stars) {
-      ctx.fillStyle = `rgba(200, 220, 255, ${0.15 + s.s * 0.1})`;
+      ctx.fillStyle = `rgba(200, 220, 255, ${0.12 + s.s * 0.08})`;
       ctx.fillRect(s.x, s.y, s.s, s.s);
     }
 
-    ctx.strokeStyle = "rgba(103, 232, 249, 0.12)";
-    ctx.lineWidth = 1;
-    ctx.strokeRect(1, 1, W - 2, H - 2);
+    ctx.strokeStyle = "rgba(103, 232, 249, 0.15)";
+    ctx.strokeRect(0.5, 0.5, W - 1, H - 1);
 
-    for (const c of PILLARS) drawPillar(c);
-
-    for (const g of ghosts) drawGhostTrail(g);
+    for (const c of pillars) drawPillar(c);
 
     for (const o of orbList) {
       const pulse = 0.65 + 0.35 * Math.sin(o.pulse);
@@ -297,26 +327,33 @@
       ctx.fill();
     }
 
-    const shipAngle = Math.atan2(dir.y, dir.x) + Math.PI / 2;
-    drawShip(ship, shipAngle, 1, true);
+    for (const g of ghosts) {
+      const gs = ghostState(g);
+      drawShip(gs.x, gs.y, gs.angle, 0.75, false);
+    }
+
+    if (state === "playing" || state === "ready") {
+      const shipAngle = Math.atan2(dir.y, dir.x) + Math.PI / 2;
+      drawShip(ship.x, ship.y, shipAngle, 1, true);
+    }
 
     if (ghostWarn && state === "playing") {
-      ctx.fillStyle = "rgba(245, 158, 11, 0.9)";
-      ctx.font = "600 11px Orbitron, sans-serif";
+      ctx.fillStyle = "rgba(245, 158, 11, 0.95)";
+      ctx.font = `600 ${Math.max(10, W * 0.03)}px Orbitron, sans-serif`;
       ctx.textAlign = "center";
-      ctx.fillText("ECHO INCOMING…", W / 2, 18);
+      ctx.fillText("ECHO INCOMING…", W / 2, W * 0.05 + 12);
     }
 
     if (state === "ready") {
-      ctx.fillStyle = "rgba(15, 15, 26, 0.82)";
+      ctx.fillStyle = "rgba(15, 15, 26, 0.85)";
       ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = "#f1f5f9";
-      ctx.font = "600 14px Orbitron, sans-serif";
+      ctx.font = `600 ${Math.max(12, W * 0.038)}px Orbitron, sans-serif`;
       ctx.textAlign = "center";
-      ctx.fillText("PRESS SPACE TO START", W / 2, H / 2 - 10);
-      ctx.font = "12px Inter, sans-serif";
+      ctx.fillText("TAP ● OR SPACE", W / 2, H / 2 - 8);
+      ctx.font = `${Math.max(11, W * 0.03)}px Inter, sans-serif`;
       ctx.fillStyle = "#94a3b8";
-      ctx.fillText("Arrows / WASD — ship never stops", W / 2, H / 2 + 12);
+      ctx.fillText("WASD / arrows / touch pad", W / 2, H / 2 + 14);
     }
   }
 
@@ -328,33 +365,73 @@
     requestAnimationFrame(loop);
   }
 
-  window.addEventListener("keydown", (e) => {
+  function onKeyDown(e) {
+    if (BLOCK_KEYS.has(e.key)) e.preventDefault();
     keys[e.key] = true;
-    if ((e.key === " " || e.key === "Enter") && (state === "ready" || state === "over")) reset();
-  });
-  window.addEventListener("keyup", (e) => {
-    keys[e.key] = false;
-  });
-
-  canvas.addEventListener("pointerdown", (e) => {
-    if (state === "ready" || state === "over") {
+    if ((e.key === " " || e.key === "Enter") && (state === "ready" || state === "over")) {
+      e.preventDefault();
       reset();
+    }
+    if (e.key === "Escape" && state === "over") closeOverlay();
+  }
+
+  function onKeyUp(e) {
+    keys[e.key] = false;
+  }
+
+  function setTouchFromBtn(dirName) {
+    if (dirName === "none") {
+      if (state === "ready" || state === "over") reset();
       return;
     }
-    const rect = canvas.getBoundingClientRect();
-    const x = ((e.clientX - rect.left) / rect.width) * W;
-    const y = ((e.clientY - rect.top) / rect.height) * H;
-    const dx = x - ship.x;
-    const dy = y - ship.y;
-    if (Math.abs(dx) > Math.abs(dy)) touchDir = { x: dx > 0 ? 1 : -1, y: 0 };
-    else touchDir = { x: 0, y: dy > 0 ? 1 : -1 };
+    const map = {
+      up: { x: 0, y: -1 },
+      down: { x: 0, y: 1 },
+      left: { x: -1, y: 0 },
+      right: { x: 1, y: 0 },
+    };
+    touchDir = map[dirName] || null;
+  }
+
+  if (touchPad) {
+    touchPad.querySelectorAll(".touch-btn").forEach((btn) => {
+      const dirName = btn.dataset.dir;
+      const start = (e) => {
+        e.preventDefault();
+        if (dirName !== "none") btn.classList.add("active");
+        setTouchFromBtn(dirName);
+      };
+      const end = (e) => {
+        e.preventDefault();
+        btn.classList.remove("active");
+        if (dirName !== "none") touchDir = null;
+      };
+      btn.addEventListener("pointerdown", start);
+      btn.addEventListener("pointerup", end);
+      btn.addEventListener("pointercancel", end);
+      btn.addEventListener("pointerleave", end);
+    });
+  }
+
+  canvas.addEventListener("pointerdown", (e) => {
+    canvas.focus({ preventScroll: true });
+    if (state === "ready" || state === "over") {
+      reset();
+    }
   });
-  canvas.addEventListener("pointerup", () => {
-    touchDir = null;
-  });
+
+  document.addEventListener("keydown", onKeyDown, { passive: false });
+  document.addEventListener("keyup", onKeyUp);
 
   btnRestart?.addEventListener("click", reset);
   btnPlayAgain?.addEventListener("click", reset);
+  btnClose?.addEventListener("click", closeOverlay);
+  btnCloseBottom?.addEventListener("click", closeOverlay);
+  overlay?.addEventListener("click", (e) => {
+    if (e.target === overlay) closeOverlay();
+  });
 
+  window.addEventListener("resize", resize);
+  resize();
   requestAnimationFrame(loop);
 })();

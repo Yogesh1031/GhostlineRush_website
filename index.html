@@ -2,11 +2,10 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
   <title>Ghostline Rush — Dodge Your Own Ghost</title>
   <meta name="description" content="Ghostline Rush: dodge your own ghost echoes. Play Marathon in your browser or download on Google Play.">
   <meta property="og:title" content="Ghostline Rush">
-  <meta property="og:description" content="Your past moves become your enemies.">
   <meta property="og:image" content="https://ghostlinerush.com/assets/logo.png">
   <link rel="icon" href="assets/logo.png" type="image/png">
   <link rel="preconnect" href="https://fonts.googleapis.com">
@@ -22,7 +21,8 @@
     <img src="assets/logo.png" width="40" height="40" alt="">
     <span>GHOSTLINE RUSH</span>
   </a>
-  <div class="nav-links">
+  <button type="button" class="nav-toggle" id="nav-toggle" aria-expanded="false" aria-label="Menu">☰</button>
+  <div class="nav-links" id="nav-links">
     <a href="#play">Play</a>
     <a href="#features">Features</a>
     <a href="support.html">Support</a>
@@ -33,7 +33,7 @@
 <section class="hero">
   <div class="hero-inner">
     <h1>Dodge Your<br><span class="accent">Own Ghost</span></h1>
-    <p>Your ship never stops. Every 8 seconds your path becomes a ghost echo. Steer, collect orbs, and survive — just like Marathon mode in the app.</p>
+    <p>Your ship never stops. Every 8 seconds your path spawns a ghost echo — steer, collect orbs, and survive.</p>
     <div class="hero-actions">
       <a class="btn btn-cyan btn-lg" href="#play">Play Marathon</a>
       <div class="icon-btns" aria-label="Social and store">
@@ -52,33 +52,32 @@
 </section>
 
 <section class="section" id="play">
-  <h2 class="section-title">Marathon — Try It</h2>
-  <p class="section-sub">Top-down arena: constant movement, screen wrap, 2 pillars, a new echo every 8 seconds (max 12).</p>
+  <h2 class="section-title">Marathon</h2>
+  <p class="section-sub">WASD or arrow keys to steer. On mobile, use the pad below the arena.</p>
 
   <div class="play-wrap">
     <div class="game-panel">
-      <canvas id="marathon-canvas" width="360" height="360" aria-label="Marathon game"></canvas>
+      <canvas id="marathon-canvas" tabindex="0" role="application" aria-label="Marathon game — use WASD or arrows"></canvas>
       <div class="game-hud">
         <span id="hud-orbs" class="gold">ORBS: 0</span>
         <span id="hud-time">TIME: 0.0 s</span>
         <span id="hud-ghosts">ECHOES: 0 / 12</span>
       </div>
-      <p class="game-controls">Arrows / WASD to steer · Space to start · Touch: tap toward a direction</p>
-      <button type="button" class="btn btn-ghost" id="btn-restart">Restart</button>
-    </div>
-    <aside class="game-sidebar">
-      <div class="tip-card">
-        <h3>Like the app</h3>
-        <ul>
-          <li>Ship moves constantly — you only change direction</li>
-          <li>Arena edges wrap (toroidal)</li>
-          <li>Every 8s your trail spawns an echo ship</li>
-          <li>Marathon: 2 pillars, no moving hazards</li>
-          <li>Exit in app to bank orbs (2× on Sunday)</li>
-        </ul>
+      <div class="touch-pad" id="touch-pad" aria-label="Touch controls">
+        <button type="button" class="touch-btn" data-dir="up" aria-label="Up">▲</button>
+        <div class="touch-pad-mid">
+          <button type="button" class="touch-btn" data-dir="left" aria-label="Left">◀</button>
+          <button type="button" class="touch-btn touch-btn-center" data-dir="none" aria-label="Start">●</button>
+          <button type="button" class="touch-btn" data-dir="right" aria-label="Right">▶</button>
+        </div>
+        <button type="button" class="touch-btn" data-dir="down" aria-label="Down">▼</button>
       </div>
+      <p class="game-controls game-controls-desktop">WASD or arrows · Space to start</p>
+      <button type="button" class="btn btn-ghost btn-restart-inline" id="btn-restart">Restart</button>
+    </div>
+    <div class="play-aside">
       <a class="btn btn-primary btn-block" href="https://play.google.com/store/apps/details?id=com.yogeshgoyal.ghostlinerush" target="_blank" rel="noopener">Get on Google Play</a>
-    </aside>
+    </div>
   </div>
 </section>
 
@@ -91,7 +90,7 @@
     </article>
     <article class="feature-card">
       <h3>Marathon</h3>
-      <p>Endless run — farm orbs and bank them to your wallet when you finish.</p>
+      <p>Endless run — collect orbs and bank them when you finish in the full game.</p>
     </article>
     <article class="feature-card">
       <h3>200-level journey</h3>
@@ -99,7 +98,7 @@
     </article>
     <article class="feature-card">
       <h3>Leaderboards</h3>
-      <p>Global orb rankings and friends on Android.</p>
+      <p>Global orb rankings on Android.</p>
     </article>
   </div>
 </section>
@@ -115,15 +114,26 @@
 
 <div class="game-overlay" id="game-overlay" role="dialog" aria-modal="true" hidden>
   <div class="overlay-card">
+    <button type="button" class="overlay-close" id="btn-close-overlay" aria-label="Close">×</button>
     <h2 id="overlay-title">Run ended</h2>
     <p id="overlay-msg"></p>
     <div id="ad-game-over" class="ad-game-over" aria-label="Advertisement"></div>
-    <button type="button" class="btn btn-cyan" id="btn-play-again">Play again</button>
-    <a class="btn btn-primary" href="https://play.google.com/store/apps/details?id=com.yogeshgoyal.ghostlinerush" target="_blank" rel="noopener">Get the app</a>
+    <div class="overlay-actions">
+      <button type="button" class="btn btn-cyan" id="btn-play-again">Play again</button>
+      <button type="button" class="btn btn-ghost" id="btn-close-bottom">Close</button>
+      <a class="btn btn-primary" href="https://play.google.com/store/apps/details?id=com.yogeshgoyal.ghostlinerush" target="_blank" rel="noopener">Get the app</a>
+    </div>
   </div>
 </div>
 
 <script src="js/ads.js"></script>
 <script src="js/marathon.js"></script>
+<script>
+  document.getElementById('nav-toggle')?.addEventListener('click', function () {
+    var links = document.getElementById('nav-links');
+    var open = links.classList.toggle('open');
+    this.setAttribute('aria-expanded', open ? 'true' : 'false');
+  });
+</script>
 </body>
 </html>
