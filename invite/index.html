@@ -1,0 +1,39 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Join Ghostline Rush</title>
+  <meta name="robots" content="noindex" />
+  <style>
+    body { font-family: system-ui, sans-serif; background: #0a0e1a; color: #e8f0ff; text-align: center; padding: 2rem; }
+    a { color: #5eead4; }
+  </style>
+</head>
+<body>
+  <p>Opening Ghostline Rush on Google Play…</p>
+  <p><a id="fallback" href="#">Tap here if nothing happens</a></p>
+  <script>
+    (function () {
+      var params = new URLSearchParams(location.search);
+      var ref = (params.get("ref") || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+      var pkg = "com.yogeshgoyal.ghostlinerush";
+      var play = "https://play.google.com/store/apps/details?id=" + pkg;
+      if (/^[A-Z]{4}[0-9]{4}$/.test(ref)) {
+        play += "&referrer=" + encodeURIComponent("ref=" + ref);
+      }
+      var fallback = document.getElementById("fallback");
+      fallback.href = play;
+      if (/Android/i.test(navigator.userAgent) && /^[A-Z]{4}[0-9]{4}$/.test(ref)) {
+        var intent =
+          "intent://ghostlinerush.com/invite?ref=" + encodeURIComponent(ref) +
+          "#Intent;scheme=https;package=" + pkg + ";end";
+        location.href = intent;
+        setTimeout(function () { location.href = play; }, 1200);
+      } else {
+        location.replace(play);
+      }
+    })();
+  </script>
+</body>
+</html>
