@@ -1,5 +1,5 @@
 /**
- * Ghostline Rush — Marathon web demo
+ * Ghostline Rush — Marathon web demo (matches app: swipe mobile, 1 orb, 8s ghosts)
  */
 (function () {
   const canvas = document.getElementById("marathon-canvas");
@@ -15,34 +15,44 @@
   const btnRestart = document.getElementById("btn-restart");
   const btnPlayAgain = document.getElementById("btn-play-again");
   const btnClose = document.getElementById("btn-close-overlay");
-  const btnCloseBottom = document.getElementById("btn-close-bottom");
-  const touchPad = document.getElementById("touch-pad");
 
+  const ARENA_W = 24.8;
+  const ARENA_H = 14.0;
   const SEGMENT_SEC = 8;
   const MAX_GHOSTS = 12;
   const SHIP_SPEED = 105;
   const SHIP_R = 12;
   const GHOST_R = 11;
-  const ORB_R = 9;
+  const ORB_R = 10;
+  const SWIPE_DRAG_MIN = 3.5;
+  const SWIPE_RELEASE_MIN = 28;
 
-  let W = 360;
-  let H = 360;
+  const isTouch =
+    "ontouchstart" in window ||
+    navigator.maxTouchPoints > 0 ||
+    window.matchMedia("(hover: none) and (pointer: coarse)").matches;
+
+  let W = 480;
+  let H = 270;
   let dpr = 1;
 
   let pillars = [];
   let state = "ready";
-  let ship = { x: 180, y: 180 };
+  let ship = { x: 240, y: 135 };
   let dir = { x: 0, y: -1 };
+  let swipeDir = null;
   let orbs = 0;
   let time = 0;
   let segmentT = 0;
   let record = [];
   let ghosts = [];
-  let orbList = [];
+  let currentOrb = null;
   let stars = [];
   const keys = {};
-  let touchDir = null;
   let ghostWarn = false;
+  let pointerId = null;
+  let swipeLast = null;
+  let swipeStart = null;
 
   const BLOCK_KEYS = new Set([
     "ArrowUp", "ArrowDown", "ArrowLeft", "ArrowRight",
@@ -58,10 +68,22 @@
 
   function resize() {
     const panel = canvas.parentElement;
-    const max = Math.min(panel ? panel.clientWidth - 8 : 360, 420, window.innerWidth - 24);
-    const size = Math.max(280, Math.floor(max));
-    W = size;
-    H = size;
+    const pad = 16;
+    const maxW = Math.min(
+      panel ? panel.clientWidth - pad : 720,
+      720,
+      window.innerWidth - pad
+    );
+    const maxH = Math.min(window.innerHeight * 0.58, 520);
+    const aspect = ARENA_H / ARENA_W;
+    let w = Math.max(320, Math.floor(maxW));
+    let h = Math.floor(w * aspect);
+    if (h > maxH) {
+      h = Math.floor(maxH);
+      w = Math.floor(h / aspect);
+    }
+    W = w;
+    H = h;
     dpr = Math.min(window.devicePixelRatio || 1, 2);
     canvas.width = W * dpr;
     canvas.height = H * dpr;
@@ -112,14 +134,15 @@
     state = "playing";
     ship = { x: W / 2, y: H / 2 };
     dir = { x: 0, y: -1 };
+    swipeDir = null;
     orbs = 0;
     time = 0;
     segmentT = 0;
     record = [];
     ghosts = [];
-    orbList = [];
+    currentOrb = null;
     ghostWarn = false;
-    fillOrbs();
+    ensureOrb();
     updateHud();
     canvas.focus({ preventScroll: true });
   }
@@ -132,31 +155,23 @@
   }
 
   function spawnOrb() {
-    for (let i = 0; i < 40; i++) {
-      const p = { x: rand(ORB_R + 8, W - ORB_R - 8), y: rand(ORB_R + 8, H - ORB_R - 8) };
-      if (pillarHit(p) || dist(p, ship) < 36) continue;
-      let ok = true;
-      for (const o of orbList) {
-        if (dist(p, o) < 24) {
-          ok = false;
-          break;
-        }
-      }
-      if (ok) {
-        orbList.push({ x: p.x, y: p.y, pulse: Math.random() * 6.28 });
-        return;
-      }
+    for (let i = 0; i < 50; i++) {
+      const p = { x: rand(ORB_R + 10, W - ORB_R - 10), y: rand(ORB_R + 10, H - ORB_R - 10) };
+      if (pillarHit(p) || dist(p, ship) < 40) continue;
+      if (currentOrb && dist(p, currentOrb) < 32) continue;
+      currentOrb = { x: p.x, y: p.y, pulse: Math.random() * 6.28 };
+      return;
     }
   }
 
-  function fillOrbs() {
-    while (orbList.length < 5) spawnOrb();
+  function ensureOrb() {
+    if (!currentOrb) spawnOrb();
   }
 
   function updateHud() {
     if (hudOrbs) hudOrbs.textContent = `ORBS: ${orbs}`;
     if (hudTime) hudTime.textContent = `TIME: ${time.toFixed(1)} s`;
-    if (hudGhosts) hudGhosts.textContent = `ECHOES: ${ghosts.length} / ${MAX_GHOSTS}`;
+    if (hudGhosts) hudGhosts.textContent = `GHOST: ${ghosts.length} / ${MAX_GHOSTS}`;
   }
 
   function gameOver(reason) {
@@ -200,13 +215,27 @@
     return { x, y, angle };
   }
 
+  function applySwipeDelta(dx, dy) {
+    if (Math.abs(dx) > Math.abs(dy)) {
+      if (Math.abs(dx) > SWIPE_DRAG_MIN) swipeDir = { x: dx > 0 ? 1 : -1, y: 0 };
+    } else if (Math.abs(dy) > SWIPE_DRAG_MIN) {
+      swipeDir = { x: 0, y: dy > 0 ? 1 : -1 };
+    }
+    if (swipeDir) dir = swipeDir;
+  }
+
+  function applySwipeRelease(dx, dy) {
+    if (Math.abs(dx) < SWIPE_RELEASE_MIN && Math.abs(dy) < SWIPE_RELEASE_MIN) return;
+    applySwipeDelta(dx, dy);
+  }
+
   function applyInput() {
     let nd = null;
     if (keys.ArrowRight || keys.d || keys.D) nd = { x: 1, y: 0 };
     else if (keys.ArrowLeft || keys.a || keys.A) nd = { x: -1, y: 0 };
     else if (keys.ArrowDown || keys.s || keys.S) nd = { x: 0, y: 1 };
     else if (keys.ArrowUp || keys.w || keys.W) nd = { x: 0, y: -1 };
-    else if (touchDir) nd = touchDir;
+    else if (swipeDir) nd = swipeDir;
     if (nd) dir = nd;
   }
 
@@ -229,16 +258,15 @@
 
     for (const g of ghosts) g.t += dt;
 
-    for (let i = orbList.length - 1; i >= 0; i--) {
-      const o = orbList[i];
-      o.pulse += dt * 4;
-      if (dist(ship, o) < ORB_R + SHIP_R) {
+    if (currentOrb) {
+      currentOrb.pulse += dt * 4;
+      if (dist(ship, currentOrb) < ORB_R + SHIP_R) {
         orbs++;
-        orbList.splice(i, 1);
+        currentOrb = null;
         spawnOrb();
       }
     }
-    fillOrbs();
+    ensureOrb();
 
     if (pillarHit(ship)) {
       gameOver("You hit a pillar.");
@@ -300,9 +328,9 @@
     ctx.fillStyle = "#0f0f1a";
     ctx.fillRect(0, 0, W, H);
 
-    if (stars.length < 50) {
+    if (stars.length < 60) {
       stars.length = 0;
-      for (let i = 0; i < 50; i++) {
+      for (let i = 0; i < 60; i++) {
         stars.push({ x: Math.random() * W, y: Math.random() * H, s: Math.random() * 1.5 });
       }
     }
@@ -316,14 +344,18 @@
 
     for (const c of pillars) drawPillar(c);
 
-    for (const o of orbList) {
-      const pulse = 0.65 + 0.35 * Math.sin(o.pulse);
-      const grd = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, ORB_R);
+    if (currentOrb) {
+      const pulse = 0.65 + 0.35 * Math.sin(currentOrb.pulse);
+      const grd = ctx.createRadialGradient(
+        currentOrb.x, currentOrb.y, 0,
+        currentOrb.x, currentOrb.y, ORB_R * 1.4
+      );
       grd.addColorStop(0, `rgba(252, 211, 77, ${pulse})`);
+      grd.addColorStop(0.5, `rgba(245, 158, 11, ${pulse * 0.7})`);
       grd.addColorStop(1, "rgba(245, 158, 11, 0)");
       ctx.fillStyle = grd;
       ctx.beginPath();
-      ctx.arc(o.x, o.y, ORB_R, 0, Math.PI * 2);
+      ctx.arc(currentOrb.x, currentOrb.y, ORB_R, 0, Math.PI * 2);
       ctx.fill();
     }
 
@@ -339,21 +371,25 @@
 
     if (ghostWarn && state === "playing") {
       ctx.fillStyle = "rgba(245, 158, 11, 0.95)";
-      ctx.font = `600 ${Math.max(10, W * 0.03)}px Orbitron, sans-serif`;
+      ctx.font = `600 ${Math.max(10, W * 0.028)}px Orbitron, sans-serif`;
       ctx.textAlign = "center";
-      ctx.fillText("ECHO INCOMING…", W / 2, W * 0.05 + 12);
+      ctx.fillText("GHOST INCOMING…", W / 2, 18);
     }
 
     if (state === "ready") {
       ctx.fillStyle = "rgba(15, 15, 26, 0.85)";
       ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = "#f1f5f9";
-      ctx.font = `600 ${Math.max(12, W * 0.038)}px Orbitron, sans-serif`;
+      ctx.font = `600 ${Math.max(12, W * 0.032)}px Orbitron, sans-serif`;
       ctx.textAlign = "center";
-      ctx.fillText("TAP ● OR SPACE", W / 2, H / 2 - 8);
-      ctx.font = `${Math.max(11, W * 0.03)}px Inter, sans-serif`;
+      ctx.fillText(isTouch ? "TAP TO START" : "TAP OR SPACE", W / 2, H / 2 - 8);
+      ctx.font = `${Math.max(11, W * 0.026)}px Inter, sans-serif`;
       ctx.fillStyle = "#94a3b8";
-      ctx.fillText("WASD / arrows / touch pad", W / 2, H / 2 + 14);
+      ctx.fillText(
+        isTouch ? "Swipe to steer" : "WASD or arrow keys",
+        W / 2,
+        H / 2 + 14
+      );
     }
   }
 
@@ -379,45 +415,60 @@
     keys[e.key] = false;
   }
 
-  function setTouchFromBtn(dirName) {
-    if (dirName === "none") {
-      if (state === "ready" || state === "over") reset();
-      return;
-    }
-    const map = {
-      up: { x: 0, y: -1 },
-      down: { x: 0, y: 1 },
-      left: { x: -1, y: 0 },
-      right: { x: 1, y: 0 },
-    };
-    touchDir = map[dirName] || null;
-  }
-
-  if (touchPad) {
-    touchPad.querySelectorAll(".touch-btn").forEach((btn) => {
-      const dirName = btn.dataset.dir;
-      const start = (e) => {
-        e.preventDefault();
-        if (dirName !== "none") btn.classList.add("active");
-        setTouchFromBtn(dirName);
-      };
-      const end = (e) => {
-        e.preventDefault();
-        btn.classList.remove("active");
-        if (dirName !== "none") touchDir = null;
-      };
-      btn.addEventListener("pointerdown", start);
-      btn.addEventListener("pointerup", end);
-      btn.addEventListener("pointercancel", end);
-      btn.addEventListener("pointerleave", end);
-    });
-  }
-
-  canvas.addEventListener("pointerdown", (e) => {
-    canvas.focus({ preventScroll: true });
-    if (state === "ready" || state === "over") {
+  function tryStart(e) {
+    if (state === "ready") {
+      e.preventDefault();
       reset();
+      return true;
     }
+    return false;
+  }
+
+  canvas.addEventListener(
+    "pointerdown",
+    (e) => {
+      canvas.setPointerCapture(e.pointerId);
+      canvas.focus({ preventScroll: true });
+      pointerId = e.pointerId;
+      swipeStart = { x: e.clientX, y: e.clientY };
+      swipeLast = swipeStart;
+      if (tryStart(e)) return;
+    },
+    { passive: false }
+  );
+
+  canvas.addEventListener(
+    "pointermove",
+    (e) => {
+      if (e.pointerId !== pointerId || state !== "playing" || !swipeLast) return;
+      const dx = e.clientX - swipeLast.x;
+      const dy = e.clientY - swipeLast.y;
+      swipeLast = { x: e.clientX, y: e.clientY };
+      if (Math.abs(dx) > 0.5 || Math.abs(dy) > 0.5) applySwipeDelta(dx, dy);
+      e.preventDefault();
+    },
+    { passive: false }
+  );
+
+  canvas.addEventListener(
+    "pointerup",
+    (e) => {
+      if (e.pointerId !== pointerId) return;
+      if (swipeStart && state === "playing") {
+        applySwipeRelease(e.clientX - swipeStart.x, e.clientY - swipeStart.y);
+      }
+      pointerId = null;
+      swipeLast = null;
+      swipeStart = null;
+      e.preventDefault();
+    },
+    { passive: false }
+  );
+
+  canvas.addEventListener("pointercancel", () => {
+    pointerId = null;
+    swipeLast = null;
+    swipeStart = null;
   });
 
   document.addEventListener("keydown", onKeyDown, { passive: false });
@@ -426,7 +477,6 @@
   btnRestart?.addEventListener("click", reset);
   btnPlayAgain?.addEventListener("click", reset);
   btnClose?.addEventListener("click", closeOverlay);
-  btnCloseBottom?.addEventListener("click", closeOverlay);
   overlay?.addEventListener("click", (e) => {
     if (e.target === overlay) closeOverlay();
   });
