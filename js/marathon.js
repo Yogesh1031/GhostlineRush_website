@@ -1,6 +1,6 @@
 /**
- * Ghostline Rush — web Marathon demo (simplified endless run).
- * Mirrors app mode: 2 pillars, ghost echoes from your path, orb collection.
+ * Ghostline Rush — Marathon web demo (top-down, matches core loop).
+ * Constant movement · 4-way steer · screen wrap · ghost echo every 8s · 2 pillars · max 12 echoes.
  */
 (function () {
   const canvas = document.getElementById("marathon-canvas");
@@ -17,292 +17,340 @@
   const btnPlayAgain = document.getElementById("btn-play-again");
 
   const W = 360;
-  const H = 520;
+  const H = 360;
   const DPR = Math.min(window.devicePixelRatio || 1, 2);
   canvas.width = W * DPR;
   canvas.height = H * DPR;
-  canvas.style.aspectRatio = `${W} / ${H}`;
+  canvas.style.aspectRatio = "1 / 1";
   ctx.scale(DPR, DPR);
 
-  const PILLAR_X = [W * 0.28, W * 0.72];
-  const PILLAR_W = 36;
-  const GHOST_INTERVAL = 5;
+  const SEGMENT_SEC = 8;
   const MAX_GHOSTS = 12;
-  const GHOST_POINT_EVERY = 8;
+  const SHIP_SPEED = 105;
+  const SHIP_R = 12;
+  const GHOST_R = 11;
+  const ORB_R = 9;
+
+  const PILLARS = [
+    { x: W * 0.32, y: H * 0.48, r: 22 },
+    { x: W * 0.68, y: H * 0.52, r: 22 },
+  ];
 
   let state = "ready";
-  let shipX = W / 2;
-  let shipY = H - 72;
-  let velX = 0;
-  let scroll = 0;
+  let ship = { x: W / 2, y: H / 2 };
+  let dir = { x: 0, y: -1 };
   let orbs = 0;
   let time = 0;
+  let segmentT = 0;
+  let record = [];
   let ghosts = [];
-  let pathPoints = [];
-  let pathTimer = 0;
-  let ghostSpawnTimer = 0;
-  let orbSprites = [];
+  let orbList = [];
   let stars = [];
   let keys = {};
-  let touchDir = 0;
+  let touchDir = null;
+  let ghostWarn = false;
 
-  function reset() {
-    state = "playing";
-    shipX = W / 2;
-    shipY = H - 72;
-    velX = 0;
-    scroll = 0;
-    orbs = 0;
-    time = 0;
-    ghosts = [];
-    pathPoints = [];
-    pathTimer = 0;
-    ghostSpawnTimer = 0;
-    orbSprites = [];
-    overlay?.classList.remove("visible");
-    spawnOrbs();
-    updateHud();
+  function wrap(v, max) {
+    if (v < 0) return v + max;
+    if (v >= max) return v - max;
+    return v;
   }
 
-  function spawnOrbs() {
-    while (orbSprites.length < 6) {
-      const leftGap = PILLAR_X[0] - PILLAR_W / 2;
-      const rightGap = PILLAR_X[1] + PILLAR_W / 2;
-      const x = Math.random() < 0.5
-        ? rand(24, leftGap - 20)
-        : rand(rightGap + 20, W - 24);
-      orbSprites.push({
-        x,
-        y: -rand(40, H),
-        r: 10,
-        pulse: Math.random() * Math.PI * 2,
-      });
-    }
+  function wrapPos(p) {
+    p.x = wrap(p.x, W);
+    p.y = wrap(p.y, H);
+  }
+
+  function dist(a, b) {
+    return Math.hypot(a.x - b.x, a.y - b.y);
   }
 
   function rand(a, b) {
     return a + Math.random() * (b - a);
   }
 
+  function reset() {
+    state = "playing";
+    ship = { x: W / 2, y: H / 2 };
+    dir = { x: 0, y: -1 };
+    orbs = 0;
+    time = 0;
+    segmentT = 0;
+    record = [];
+    ghosts = [];
+    orbList = [];
+    ghostWarn = false;
+    if (overlay) {
+      overlay.classList.remove("visible");
+      overlay.hidden = true;
+    }
+    fillOrbs();
+    updateHud();
+  }
+
+  function pillarHit(p) {
+    for (const col of PILLARS) {
+      if (dist(p, col) < col.r + SHIP_R) return true;
+    }
+    return false;
+  }
+
+  function spawnOrb() {
+    for (let i = 0; i < 40; i++) {
+      const p = { x: rand(ORB_R, W - ORB_R), y: rand(ORB_R, H - ORB_R) };
+      if (pillarHit(p) || dist(p, ship) < 40) continue;
+      let ok = true;
+      for (const o of orbList) {
+        if (dist(p, o) < 28) {
+          ok = false;
+          break;
+        }
+      }
+      if (ok) {
+        orbList.push({ ...p, pulse: Math.random() * 6.28 });
+        return;
+      }
+    }
+  }
+
+  function fillOrbs() {
+    while (orbList.length < 5) spawnOrb();
+  }
+
   function updateHud() {
     if (hudOrbs) hudOrbs.textContent = `ORBS: ${orbs}`;
     if (hudTime) hudTime.textContent = `TIME: ${time.toFixed(1)} s`;
-    if (hudGhosts) hudGhosts.textContent = `GHOST: ${ghosts.length} / ${MAX_GHOSTS}`;
+    if (hudGhosts) hudGhosts.textContent = `ECHOES: ${ghosts.length} / ${MAX_GHOSTS}`;
   }
 
   function gameOver(reason) {
     state = "over";
     if (overlay) {
+      overlay.hidden = false;
       overlay.classList.add("visible");
-      if (overlayTitle) overlayTitle.textContent = "RUN ENDED";
-      if (overlayMsg) {
-        overlayMsg.textContent = `${reason} You collected ${orbs} orbs in ${time.toFixed(1)}s. Download the app for wallet rewards & Sunday 2× bonus.`;
-      }
     }
-    window.GhostlineAds?.showInterstitial?.();
-  }
-
-  function dist(ax, ay, bx, by) {
-    return Math.hypot(ax - bx, ay - by);
-  }
-
-  function hitPillars(x, y) {
-    for (const px of PILLAR_X) {
-      if (x > px - PILLAR_W / 2 - 14 && x < px + PILLAR_W / 2 + 14) return true;
+    if (overlayTitle) overlayTitle.textContent = "RUN ENDED";
+    if (overlayMsg) {
+      overlayMsg.textContent = `${reason} You collected ${orbs} orbs in ${time.toFixed(1)}s. Bank orbs in the app (2× on Sunday).`;
     }
-    return false;
+    window.GhostlineAds?.showGameOverAd?.();
   }
 
-  function hitGhosts(x, y) {
-    for (const g of ghosts) {
-      for (let i = 1; i < g.points.length; i++) {
-        const a = g.points[i - 1];
-        const b = g.points[i];
-        const d = pointSegDist(x, y, a.x, a.y + g.offset, b.x, b.y + g.offset);
-        if (d < 16) return true;
-      }
-    }
-    return false;
+  function finalizeSegment() {
+    if (record.length < 4) return;
+    const path = record.map((p) => ({ x: p.x, y: p.y }));
+    ghosts.push({
+      path,
+      t: 0,
+      duration: SEGMENT_SEC,
+    });
+    if (ghosts.length > MAX_GHOSTS) ghosts.shift();
+    record = [];
+    segmentT = 0;
+    ghostWarn = false;
   }
 
-  function pointSegDist(px, py, x1, y1, x2, y2) {
-    const dx = x2 - x1;
-    const dy = y2 - y1;
-    const t = Math.max(0, Math.min(1, ((px - x1) * dx + (py - y1) * dy) / (dx * dx + dy * dy + 1e-6)));
-    return dist(px, py, x1 + t * dx, y1 + t * dy);
+  function ghostShipPos(g) {
+    const n = g.path.length;
+    if (n < 2) return g.path[0] || { x: 0, y: 0 };
+    const u = (g.t % g.duration) / g.duration;
+    const idx = u * (n - 1);
+    const i = Math.floor(idx);
+    const f = idx - i;
+    const a = g.path[i];
+    const b = g.path[Math.min(i + 1, n - 1)];
+    return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+  }
+
+  function applyInput() {
+    let nd = null;
+    if (keys.ArrowRight || keys.d) nd = { x: 1, y: 0 };
+    else if (keys.ArrowLeft || keys.a) nd = { x: -1, y: 0 };
+    else if (keys.ArrowDown || keys.s) nd = { x: 0, y: 1 };
+    else if (keys.ArrowUp || keys.w) nd = { x: 0, y: -1 };
+    else if (touchDir) nd = touchDir;
+    if (nd) dir = nd;
   }
 
   function update(dt) {
     if (state !== "playing") return;
 
     time += dt;
-    scroll += dt * 90;
-    pathTimer += dt;
-    ghostSpawnTimer += dt;
+    segmentT += dt;
+    applyInput();
 
-    const steer = (keys.ArrowLeft || keys.a ? -1 : 0) + (keys.ArrowRight || keys.d ? 1 : 0) + touchDir;
-    velX += steer * 420 * dt;
-    velX *= 0.88;
-    shipX += velX * dt;
-    shipX = Math.max(22, Math.min(W - 22, shipX));
+    ship.x += dir.x * SHIP_SPEED * dt;
+    ship.y += dir.y * SHIP_SPEED * dt;
+    wrapPos(ship);
 
-    if (pathTimer > GHOST_POINT_EVERY / 60) {
-      pathTimer = 0;
-      pathPoints.push({ x: shipX, y: shipY });
-      if (pathPoints.length > 80) pathPoints.shift();
-    }
+    record.push({ x: ship.x, y: ship.y });
+    if (record.length > 500) record.shift();
 
-    if (ghostSpawnTimer >= GHOST_INTERVAL) {
-      ghostSpawnTimer = 0;
-      if (ghosts.length < MAX_GHOSTS && pathPoints.length > 4) {
-        ghosts.push({
-          points: pathPoints.map((p) => ({ x: p.x, y: p.y })),
-          offset: -scroll,
-          phase: 0,
-        });
-      }
-    }
+    if (!ghostWarn && segmentT >= SEGMENT_SEC - 2) ghostWarn = true;
+    if (segmentT >= SEGMENT_SEC) finalizeSegment();
 
-    for (const g of ghosts) {
-      g.offset += dt * 90;
-      g.phase += dt * 3;
-    }
+    for (const g of ghosts) g.t += dt;
 
-    for (const o of orbSprites) {
-      o.y += dt * 90;
-      o.pulse += dt * 5;
-      if (dist(shipX, shipY, o.x, o.y) < o.r + 18) {
+    for (const o of orbList) {
+      o.pulse += dt * 4;
+      if (dist(ship, o) < ORB_R + SHIP_R) {
         orbs++;
-        o.y = H + 50;
+        orbList = orbList.filter((x) => x !== o);
+        spawnOrb();
       }
     }
-    orbSprites = orbSprites.filter((o) => o.y < H + 40);
-    spawnOrbs();
+    fillOrbs();
 
-    if (hitPillars(shipX, shipY) || hitGhosts(shipX, shipY)) {
-      gameOver(hitPillars(shipX, shipY) ? "Crashed into a pillar." : "Hit your own ghost trail.");
+    if (pillarHit(ship)) {
+      gameOver("You hit a pillar.");
+      return;
+    }
+    for (const g of ghosts) {
+      if (dist(ship, ghostShipPos(g)) < SHIP_R + GHOST_R) {
+        gameOver("You were caught by your own echo.");
+        return;
+      }
     }
 
     updateHud();
   }
 
+  function drawPillar(c) {
+    const g = ctx.createRadialGradient(c.x, c.y, 2, c.x, c.y, c.r);
+    g.addColorStop(0, "#9333ea");
+    g.addColorStop(0.6, "#6b21a8");
+    g.addColorStop(1, "rgba(6, 182, 212, 0.2)");
+    ctx.fillStyle = g;
+    ctx.beginPath();
+    ctx.arc(c.x, c.y, c.r, 0, Math.PI * 2);
+    ctx.fill();
+    ctx.strokeStyle = "rgba(103, 232, 249, 0.45)";
+    ctx.lineWidth = 2;
+    ctx.stroke();
+  }
+
+  function drawShip(p, angle, alpha, glow) {
+    ctx.save();
+    ctx.globalAlpha = alpha;
+    ctx.translate(p.x, p.y);
+    ctx.rotate(angle);
+    ctx.fillStyle = glow ? "#67e8f9" : "rgba(100, 150, 255, 0.85)";
+    ctx.shadowColor = glow ? "#06b6d4" : "transparent";
+    ctx.shadowBlur = glow ? 14 : 0;
+    ctx.beginPath();
+    ctx.moveTo(0, -14);
+    ctx.lineTo(10, 10);
+    ctx.lineTo(0, 5);
+    ctx.lineTo(-10, 10);
+    ctx.closePath();
+    ctx.fill();
+    ctx.restore();
+  }
+
+  function drawGhostTrail(g) {
+    if (g.path.length < 2) return;
+    ctx.strokeStyle = "rgba(100, 150, 255, 0.25)";
+    ctx.lineWidth = 3;
+    ctx.lineCap = "round";
+    ctx.beginPath();
+    ctx.moveTo(g.path[0].x, g.path[0].y);
+    for (let i = 1; i < g.path.length; i++) ctx.lineTo(g.path[i].x, g.path[i].y);
+    ctx.stroke();
+    const gp = ghostShipPos(g);
+    const angle = Math.atan2(
+      g.path[Math.min(1, g.path.length - 1)].y - g.path[0].y,
+      g.path[Math.min(1, g.path.length - 1)].x - g.path[0].x
+    );
+    drawShip(gp, angle - Math.PI / 2, 0.7, false);
+  }
+
   function draw() {
-    ctx.fillStyle = "#050508";
+    ctx.fillStyle = "#0f0f1a";
     ctx.fillRect(0, 0, W, H);
 
-    // Starfield
-    if (stars.length < 80) {
-      for (let i = 0; i < 80; i++) {
-        stars.push({ x: Math.random() * W, y: Math.random() * H, s: Math.random() * 2, sp: 0.2 + Math.random() * 0.8 });
+    if (stars.length < 60) {
+      for (let i = 0; i < 60; i++) {
+        stars.push({ x: Math.random() * W, y: Math.random() * H, s: Math.random() * 1.5 });
       }
     }
     for (const s of stars) {
-      s.y = (s.y + s.sp) % H;
-      ctx.fillStyle = `rgba(200,220,255,${0.2 + s.s * 0.15})`;
+      ctx.fillStyle = `rgba(200, 220, 255, ${0.15 + s.s * 0.1})`;
       ctx.fillRect(s.x, s.y, s.s, s.s);
     }
 
-    // Pillars
-    for (const px of PILLAR_X) {
-      const grd = ctx.createLinearGradient(px - PILLAR_W / 2, 0, px + PILLAR_W / 2, H);
-      grd.addColorStop(0, "#252540");
-      grd.addColorStop(0.5, "#6b21a8");
-      grd.addColorStop(1, "#06b6d4");
+    ctx.strokeStyle = "rgba(103, 232, 249, 0.12)";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(1, 1, W - 2, H - 2);
+
+    for (const c of PILLARS) drawPillar(c);
+
+    for (const g of ghosts) drawGhostTrail(g);
+
+    for (const o of orbList) {
+      const pulse = 0.65 + 0.35 * Math.sin(o.pulse);
+      const grd = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, ORB_R);
+      grd.addColorStop(0, `rgba(252, 211, 77, ${pulse})`);
+      grd.addColorStop(1, "rgba(245, 158, 11, 0)");
       ctx.fillStyle = grd;
-      ctx.fillRect(px - PILLAR_W / 2, 0, PILLAR_W, H);
-      ctx.strokeStyle = "rgba(103,232,249,0.4)";
-      ctx.lineWidth = 2;
-      ctx.strokeRect(px - PILLAR_W / 2, 0, PILLAR_W, H);
-    }
-
-    // Ghost trails
-    for (const g of ghosts) {
       ctx.beginPath();
-      ctx.strokeStyle = `rgba(100, 150, 255, ${0.35 + 0.15 * Math.sin(g.phase)})`;
-      ctx.lineWidth = 10;
-      ctx.lineCap = "round";
-      ctx.lineJoin = "round";
-      for (let i = 0; i < g.points.length; i++) {
-        const p = g.points[i];
-        const y = p.y + g.offset;
-        if (i === 0) ctx.moveTo(p.x, y);
-        else ctx.lineTo(p.x, y);
-      }
-      ctx.stroke();
-    }
-
-    // Orbs
-    for (const o of orbSprites) {
-      const glow = 0.6 + 0.4 * Math.sin(o.pulse);
-      ctx.beginPath();
-      ctx.arc(o.x, o.y, o.r, 0, Math.PI * 2);
-      const og = ctx.createRadialGradient(o.x, o.y, 0, o.x, o.y, o.r);
-      og.addColorStop(0, `rgba(252, 211, 77, ${glow})`);
-      og.addColorStop(1, "rgba(245, 158, 11, 0)");
-      ctx.fillStyle = og;
+      ctx.arc(o.x, o.y, ORB_R, 0, Math.PI * 2);
       ctx.fill();
     }
 
-    // Ship
-    ctx.save();
-    ctx.translate(shipX, shipY);
-    ctx.rotate(velX * 0.002);
-    ctx.fillStyle = "#67e8f9";
-    ctx.beginPath();
-    ctx.moveTo(0, -22);
-    ctx.lineTo(16, 14);
-    ctx.lineTo(0, 8);
-    ctx.lineTo(-16, 14);
-    ctx.closePath();
-    ctx.fill();
-    ctx.shadowColor = "#06b6d4";
-    ctx.shadowBlur = 16;
-    ctx.fill();
-    ctx.restore();
+    const shipAngle = Math.atan2(dir.y, dir.x) + Math.PI / 2;
+    drawShip(ship, shipAngle, 1, true);
+
+    if (ghostWarn && state === "playing") {
+      ctx.fillStyle = "rgba(245, 158, 11, 0.9)";
+      ctx.font = "600 11px Orbitron, sans-serif";
+      ctx.textAlign = "center";
+      ctx.fillText("ECHO INCOMING…", W / 2, 18);
+    }
 
     if (state === "ready") {
-      ctx.fillStyle = "rgba(15,15,26,0.75)";
+      ctx.fillStyle = "rgba(15, 15, 26, 0.82)";
       ctx.fillRect(0, 0, W, H);
       ctx.fillStyle = "#f1f5f9";
-      ctx.font = "600 16px Orbitron, sans-serif";
+      ctx.font = "600 14px Orbitron, sans-serif";
       ctx.textAlign = "center";
-      ctx.fillText("TAP OR PRESS START", W / 2, H / 2 - 8);
-      ctx.font = "13px Inter, sans-serif";
+      ctx.fillText("PRESS SPACE TO START", W / 2, H / 2 - 10);
+      ctx.font = "12px Inter, sans-serif";
       ctx.fillStyle = "#94a3b8";
-      ctx.fillText("← → or A D to steer", W / 2, H / 2 + 16);
+      ctx.fillText("Arrows / WASD — ship never stops", W / 2, H / 2 + 12);
     }
   }
 
   let last = performance.now();
   function loop(now) {
-    const dt = Math.min((now - last) / 1000, 0.05);
+    update(Math.min((now - last) / 1000, 0.05));
     last = now;
-    update(dt);
     draw();
     requestAnimationFrame(loop);
   }
 
   window.addEventListener("keydown", (e) => {
     keys[e.key] = true;
-    if (e.key === " " || e.key === "Enter") {
-      if (state === "ready" || state === "over") reset();
-    }
+    if ((e.key === " " || e.key === "Enter") && (state === "ready" || state === "over")) reset();
   });
   window.addEventListener("keyup", (e) => {
     keys[e.key] = false;
   });
 
   canvas.addEventListener("pointerdown", (e) => {
+    if (state === "ready" || state === "over") {
+      reset();
+      return;
+    }
     const rect = canvas.getBoundingClientRect();
     const x = ((e.clientX - rect.left) / rect.width) * W;
-    touchDir = x < shipX ? -1 : 1;
-    if (state === "ready" || state === "over") reset();
+    const y = ((e.clientY - rect.top) / rect.height) * H;
+    const dx = x - ship.x;
+    const dy = y - ship.y;
+    if (Math.abs(dx) > Math.abs(dy)) touchDir = { x: dx > 0 ? 1 : -1, y: 0 };
+    else touchDir = { x: 0, y: dy > 0 ? 1 : -1 };
   });
   canvas.addEventListener("pointerup", () => {
-    touchDir = 0;
-  });
-  canvas.addEventListener("pointerleave", () => {
-    touchDir = 0;
+    touchDir = null;
   });
 
   btnRestart?.addEventListener("click", reset);

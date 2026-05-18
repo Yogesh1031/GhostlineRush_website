@@ -19,17 +19,7 @@ Push this folder to [GhostlineRush_website](https://github.com/Yogesh1031/Ghostl
 
 ## Ads
 
-**Appodeal** runs in the Android app only. For the website:
-
-1. **Google AdSense** (recommended): uncomment the AdSense script in `index.html` and set in `index.html` before `ads.js`:
-
-```html
-<script>
-  window.GHOSTLINE_ADS = { adsenseClient: 'ca-pub-YOUR_ID' };
-</script>
-```
-
-2. Or inject your **Appodeal Web** / other network script into `.ad-slot` elements via `js/ads.js`.
+**Appodeal** is Android/iOS only. The site uses **Google AdSense** (`ca-pub-5372990157898133`) — one ad unit loads **only when a Marathon run ends** (game-over overlay). No banner ads elsewhere.
 
 ## Regenerate Android launcher icons (game repo)
 
